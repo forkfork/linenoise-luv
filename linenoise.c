@@ -176,6 +176,16 @@ static int l_editstop(lua_State *L)
     return 0;
 }
 
+static int l_editlen(lua_State *L)
+{
+    if (!edit_active) {
+        return luaL_error(L, "no edit session active");
+    }
+
+    lua_pushinteger(L, (lua_Integer)edit_state.len);
+    return 1;
+}
+
 /* --- Completion API --- */
 
 static int l_setcompletion(lua_State *L)
@@ -307,6 +317,7 @@ static luaL_Reg module_funcs[] = {
     { "editstart", l_editstart },
     { "editfeed", l_editfeed },
     { "editstop", l_editstop },
+    { "editlen", l_editlen },
     { "setcompletion", l_setcompletion },
     { "addcompletion", l_addcompletion },
     { "sethints", l_sethints },
