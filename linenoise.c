@@ -33,6 +33,7 @@ static void luaL_setfuncs(lua_State *L, const luaL_Reg *l, int nup)
 
 static int completion_func_ref = LUA_NOREF;
 static int hints_func_ref = LUA_NOREF;
+static int changed_func_ref = LUA_NOREF;
 static lua_State *cb_state;
 
 static void completion_wrapper(const char *line, linenoiseCompletions *completions)
@@ -117,6 +118,41 @@ static int l_linenoise(lua_State *L)
 static struct linenoiseState edit_state;
 static char edit_buf[4096];
 static int edit_active = 0;
+static char edit_changed_buf[4096];
+static size_t edit_changed_len = 0;
+
+static int check_edit_active(lua_State *L)
+{
+    if (!edit_active) {
+        return luaL_error(L, "no edit session active");
+    }
+    return 1;
+}
+
+static void edit_changed_reset(void)
+{
+    edit_changed_len = edit_state.len;
+    memcpy(edit_changed_buf, edit_state.buf, edit_state.len);
+}
+
+static void edit_changed_notify(lua_State *L)
+{
+    if (changed_func_ref == LUA_NOREF) return;
+    if (edit_state.len == edit_changed_len &&
+        memcmp(edit_changed_buf, edit_state.buf, edit_state.len) == 0) {
+        return;
+    }
+
+    edit_changed_reset();
+    lua_rawgeti(L, LUA_REGISTRYINDEX, changed_func_ref);
+    lua_pushlstring(L, edit_state.buf, edit_state.len);
+    lua_pushinteger(L, (lua_Integer)edit_state.len);
+
+    if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+        fprintf(stderr, "linenoise changed callback error: %s\n", lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+}
 
 static int l_editstart(lua_State *L)
 {
@@ -135,6 +171,7 @@ static int l_editstart(lua_State *L)
         return 2;
     }
     edit_active = 1;
+    edit_changed_reset();
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -148,6 +185,7 @@ static int l_editfeed(lua_State *L)
     char *line = linenoiseEditFeed(&edit_state);
 
     if (line == linenoiseEditMore) {
+        edit_changed_notify(L);
         lua_pushnil(L);
         lua_pushboolean(L, 1);
         return 2;
@@ -169,7 +207,7 @@ static int l_editfeed(lua_State *L)
 
 static int l_editstop(lua_State *L)
 {
-    (void)L;
+    check_edit_active(L);
     linenoiseEditStop(&edit_state);
     edit_active = 0;
     cb_state = NULL;
@@ -178,12 +216,103 @@ static int l_editstop(lua_State *L)
 
 static int l_editlen(lua_State *L)
 {
-    if (!edit_active) {
-        return luaL_error(L, "no edit session active");
-    }
+    check_edit_active(L);
 
     lua_pushinteger(L, (lua_Integer)edit_state.len);
     return 1;
+}
+
+static int l_editgetbuf(lua_State *L)
+{
+    check_edit_active(L);
+
+    lua_pushlstring(L, edit_state.buf, edit_state.len);
+    return 1;
+}
+
+static int l_editgetpos(lua_State *L)
+{
+    check_edit_active(L);
+
+    lua_pushinteger(L, (lua_Integer)edit_state.pos);
+    return 1;
+}
+
+static int l_edithide(lua_State *L)
+{
+    check_edit_active(L);
+
+    linenoiseHide(&edit_state);
+    return 0;
+}
+
+static int l_editshow(lua_State *L)
+{
+    check_edit_active(L);
+
+    linenoiseShow(&edit_state);
+    return 0;
+}
+
+static int l_editinsert(lua_State *L)
+{
+    size_t len;
+    const char *str;
+
+    check_edit_active(L);
+    str = luaL_checklstring(L, 1, &len);
+    if (len > edit_state.buflen - edit_state.len) {
+        return luaL_error(L, "edit buffer capacity exceeded");
+    }
+
+    if (linenoiseEditInsert(&edit_state, str, len) == -1) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to insert text");
+        return 2;
+    }
+
+    edit_changed_notify(L);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int l_editsetbuf(lua_State *L)
+{
+    size_t len;
+    const char *str;
+
+    check_edit_active(L);
+    str = luaL_checklstring(L, 1, &len);
+    if (len > edit_state.buflen) {
+        return luaL_error(L, "edit buffer capacity exceeded");
+    }
+
+    if (linenoiseEditSetBuffer(&edit_state, str, len) == -1) {
+        lua_pushnil(L);
+        lua_pushstring(L, "failed to set edit buffer");
+        return 2;
+    }
+
+    edit_changed_notify(L);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int l_editsetchanged(lua_State *L)
+{
+    if (lua_isnoneornil(L, 1)) {
+        luaL_unref(L, LUA_REGISTRYINDEX, changed_func_ref);
+        changed_func_ref = LUA_NOREF;
+    } else {
+        luaL_checktype(L, 1, LUA_TFUNCTION);
+        lua_pushvalue(L, 1);
+        if (changed_func_ref == LUA_NOREF) {
+            changed_func_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        } else {
+            lua_rawseti(L, LUA_REGISTRYINDEX, changed_func_ref);
+        }
+    }
+    return 0;
 }
 
 /* --- Completion API --- */
@@ -318,6 +447,14 @@ static luaL_Reg module_funcs[] = {
     { "editfeed", l_editfeed },
     { "editstop", l_editstop },
     { "editlen", l_editlen },
+    { "editgetlen", l_editlen },
+    { "editgetbuf", l_editgetbuf },
+    { "editgetpos", l_editgetpos },
+    { "edithide", l_edithide },
+    { "editshow", l_editshow },
+    { "editinsert", l_editinsert },
+    { "editsetbuf", l_editsetbuf },
+    { "editsetchanged", l_editsetchanged },
     { "setcompletion", l_setcompletion },
     { "addcompletion", l_addcompletion },
     { "sethints", l_sethints },

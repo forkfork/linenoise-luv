@@ -86,6 +86,8 @@ char *linenoiseEditFeed(struct linenoiseState *l);
 void linenoiseEditStop(struct linenoiseState *l);
 void linenoiseHide(struct linenoiseState *l);
 void linenoiseShow(struct linenoiseState *l);
+int linenoiseEditInsert(struct linenoiseState *l, const char *c, size_t clen);
+int linenoiseEditSetBuffer(struct linenoiseState *l, const char *buf, size_t len);
 
 /* Blocking API. */
 char *linenoise(const char *prompt);

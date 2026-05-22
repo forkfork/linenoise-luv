@@ -52,7 +52,16 @@ See `example_luv.lua` for use with `luv`.
 - `editfeed()` advances the active edit session and returns `nil, true` while
   editing continues, a completed line when done, or `nil, nil` on EOF/error.
 - `editstop()` stops the active edit session.
-- `editlen()` returns the current non-blocking edit buffer length in bytes.
+- `editlen()` and `editgetlen()` return the current non-blocking edit buffer
+  length in bytes.
+- `editgetbuf()` returns the current non-blocking edit buffer content.
+- `editgetpos()` returns the current cursor position as a 0-based byte offset.
+- `edithide()` hides the active prompt line, and `editshow()` redraws it.
+- `editinsert(text)` inserts text at the current cursor position.
+- `editsetbuf(text)` replaces the current edit buffer and moves the cursor to
+  the end.
+- `editsetchanged(fn)` registers a callback fired after the edit buffer changes.
+  The callback receives `(text, len)`. Pass `nil` to clear it.
 - `setcompletion(fn)` registers a completion callback.
 - `sethints(fn)` registers a hints callback.
 - `historyadd(line)`, `historysetmaxlen(len)`, `historysave(path)`, and
@@ -67,22 +76,22 @@ Before uploading to LuaRocks:
 1. Commit the repository and tag the release:
 
    ```sh
-   git tag v0.1.1
+   git tag v0.1.2
    git push origin main --tags
    ```
 
 2. Check the rock locally:
 
    ```sh
-   luarocks lint linenoise-luv-0.1.1-1.rockspec
-   luarocks make linenoise-luv-0.1.1-1.rockspec
-   luarocks pack linenoise-luv-0.1.1-1.rockspec
+   luarocks lint linenoise-luv-0.1.2-1.rockspec
+   luarocks make linenoise-luv-0.1.2-1.rockspec
+   luarocks pack linenoise-luv-0.1.2-1.rockspec
    ```
 
 3. Upload:
 
    ```sh
-   luarocks upload linenoise-luv-0.1.1-1.rockspec --api-key=YOUR_API_KEY
+   luarocks upload linenoise-luv-0.1.2-1.rockspec --api-key=YOUR_API_KEY
    ```
 
 LuaRocks package names are global. The package name here is

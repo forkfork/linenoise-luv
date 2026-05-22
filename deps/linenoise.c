@@ -1536,6 +1536,17 @@ int linenoiseEditInsert(struct linenoiseState *l, const char *c, size_t clen) {
     return 0;
 }
 
+/* Replace the current edit buffer and refresh the prompt. */
+int linenoiseEditSetBuffer(struct linenoiseState *l, const char *buf, size_t len) {
+    if (linenoiseEditGrow(l,len) == -1) return -1;
+    memcpy(l->buf,buf,len);
+    l->buf[len] = '\0';
+    l->pos = l->len = len;
+    linenoiseFoldClear(l);
+    refreshLine(l);
+    return 0;
+}
+
 /* Move cursor on the left. Moves by one UTF-8 character, not byte. */
 void linenoiseEditMoveLeft(struct linenoiseState *l) {
     if (l->pos > 0) {
