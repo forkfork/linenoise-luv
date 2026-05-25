@@ -20,7 +20,7 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 	$(CC) -o $@ $(LDFLAGS) $^
 
-linenoise.o: linenoise.c
+linenoise.o: linenoise.c $(LINENOISE_DIR)/linenoise.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 linenoise_upstream.o: $(LINENOISE_DIR)/linenoise.c $(LINENOISE_DIR)/linenoise.h

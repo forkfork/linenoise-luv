@@ -56,6 +56,7 @@ struct linenoiseState {
     int in_completion;  /* The user pressed TAB and we are now in completion
                          * mode, so input is handled by completeLine(). */
     size_t completion_idx; /* Index of next completion to propose. */
+    int in_history_search; /* Ctrl-R reverse history search is active. */
     int ifd;            /* Terminal stdin file descriptor. */
     int ofd;            /* Terminal stdout file descriptor. */
     char *buf;          /* Edited line buffer. */
@@ -70,6 +71,15 @@ struct linenoiseState {
     size_t oldrows;     /* Rows used by last refrehsed line (multiline mode) */
     int oldrpos;        /* Cursor row from last refresh (for multiline clearing). */
     int history_index;  /* The history index we are currently editing. */
+    char history_search[256]; /* Reverse-search query. */
+    size_t history_search_len; /* Query length in bytes. */
+    int history_search_index; /* Current matching history array index. */
+    char *history_search_saved; /* Original buffer before search. */
+    size_t history_search_saved_len;
+    size_t history_search_saved_pos;
+    const char *history_search_saved_prompt;
+    size_t history_search_saved_plen;
+    char history_search_prompt[320];
     int fold_count;    /* Number of folded ranges. */
     size_t fold_start[LINENOISE_MAX_FOLDS]; /* Folded range start offsets. */
     size_t fold_end[LINENOISE_MAX_FOLDS];   /* Folded range end offsets. */

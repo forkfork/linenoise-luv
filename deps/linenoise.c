@@ -491,6 +491,7 @@ enum KEY_ACTION{
 	CTRL_D = 4,         /* Ctrl-d */
 	CTRL_E = 5,         /* Ctrl-e */
 	CTRL_F = 6,         /* Ctrl-f */
+	CTRL_G = 7,         /* Ctrl-g */
 	CTRL_H = 8,         /* Ctrl-h */
 	TAB = 9,            /* Tab */
 	CTRL_K = 11,        /* Ctrl+k */
@@ -498,6 +499,7 @@ enum KEY_ACTION{
 	ENTER = 13,         /* Enter */
 	CTRL_N = 14,        /* Ctrl-n */
 	CTRL_P = 16,        /* Ctrl-p */
+	CTRL_R = 18,        /* Ctrl+r */
 	CTRL_T = 20,        /* Ctrl-t */
 	CTRL_U = 21,        /* Ctrl+u */
 	CTRL_W = 23,        /* Ctrl+w */
@@ -1563,6 +1565,35 @@ void linenoiseEditMoveRight(struct linenoiseState *l) {
     }
 }
 
+/* Move cursor one word left. Words are separated by ASCII whitespace, matching
+ * the existing Ctrl-W word deletion behavior. */
+void linenoiseEditMoveWordLeft(struct linenoiseState *l) {
+    size_t pos = l->pos;
+
+    while (pos > 0 && isspace((unsigned char)l->buf[pos-1]))
+        pos -= linenoiseEditPrevLen(l, pos);
+    while (pos > 0 && !isspace((unsigned char)l->buf[pos-1]))
+        pos -= linenoiseEditPrevLen(l, pos);
+    if (pos != l->pos) {
+        l->pos = pos;
+        refreshLine(l);
+    }
+}
+
+/* Move cursor one word right. */
+void linenoiseEditMoveWordRight(struct linenoiseState *l) {
+    size_t pos = l->pos;
+
+    while (pos < l->len && isspace((unsigned char)l->buf[pos]))
+        pos += linenoiseEditNextLen(l, pos);
+    while (pos < l->len && !isspace((unsigned char)l->buf[pos]))
+        pos += linenoiseEditNextLen(l, pos);
+    if (pos != l->pos) {
+        l->pos = pos;
+        refreshLine(l);
+    }
+}
+
 /* Move cursor to the start of the line. */
 void linenoiseEditMoveHome(struct linenoiseState *l) {
     if (l->pos != 0) {
@@ -1669,6 +1700,169 @@ void linenoiseEditDeletePrevWord(struct linenoiseState *l) {
     refreshLine(l);
 }
 
+static int linenoiseEditSetBufferNoRefresh(struct linenoiseState *l, const char *buf, size_t len) {
+    if (linenoiseEditGrow(l,len) == -1) return -1;
+    memcpy(l->buf,buf,len);
+    l->buf[len] = '\0';
+    l->pos = l->len = len;
+    linenoiseFoldClear(l);
+    return 0;
+}
+
+static void linenoiseHistorySearchPrompt(struct linenoiseState *l) {
+    int nwritten = snprintf(l->history_search_prompt,
+        sizeof(l->history_search_prompt),
+        "(reverse-i-search)`%s': ", l->history_search);
+    if (nwritten < 0) {
+        l->history_search_prompt[0] = '\0';
+    } else if ((size_t)nwritten >= sizeof(l->history_search_prompt)) {
+        l->history_search_prompt[sizeof(l->history_search_prompt)-1] = '\0';
+    }
+    l->prompt = l->history_search_prompt;
+    l->plen = strlen(l->prompt);
+}
+
+static int linenoiseHistorySearchFind(struct linenoiseState *l, int start) {
+    int i;
+
+    for (i = start; i >= 0; i--) {
+        if (strstr(history[i],l->history_search) != NULL) return i;
+    }
+    return -1;
+}
+
+static void linenoiseHistorySearchRefresh(struct linenoiseState *l, int start) {
+    int match = -1;
+
+    if (history_len > 1 && start >= 0)
+        match = linenoiseHistorySearchFind(l,start);
+    if (match != -1) {
+        l->history_search_index = match;
+        linenoiseEditSetBufferNoRefresh(l,history[match],strlen(history[match]));
+    } else {
+        l->history_search_index = -1;
+        linenoiseEditSetBufferNoRefresh(l,"",0);
+        linenoiseBeep();
+    }
+    linenoiseHistorySearchPrompt(l);
+    refreshLine(l);
+}
+
+static void linenoiseHistorySearchCancel(struct linenoiseState *l) {
+    char *saved = l->history_search_saved;
+    size_t saved_len = l->history_search_saved_len;
+    size_t saved_pos = l->history_search_saved_pos;
+
+    l->prompt = l->history_search_saved_prompt;
+    l->plen = l->history_search_saved_plen;
+    l->in_history_search = 0;
+    l->history_search_saved = NULL;
+    linenoiseEditSetBufferNoRefresh(l,saved ? saved : "", saved ? saved_len : 0);
+    if (saved_pos <= l->len) l->pos = saved_pos;
+    free(saved);
+    refreshLine(l);
+}
+
+static void linenoiseHistorySearchAccept(struct linenoiseState *l) {
+    l->prompt = l->history_search_saved_prompt;
+    l->plen = l->history_search_saved_plen;
+    l->in_history_search = 0;
+    free(l->history_search_saved);
+    l->history_search_saved = NULL;
+    refreshLine(l);
+}
+
+static void linenoiseHistorySearchStart(struct linenoiseState *l) {
+    if (l->in_history_search) return;
+    l->history_search_saved = malloc(l->len+1);
+    if (!l->history_search_saved) {
+        linenoiseBeep();
+        return;
+    }
+    memcpy(l->history_search_saved,l->buf,l->len);
+    l->history_search_saved[l->len] = '\0';
+    l->history_search_saved_len = l->len;
+    l->history_search_saved_pos = l->pos;
+    l->history_search_saved_prompt = l->prompt;
+    l->history_search_saved_plen = l->plen;
+    l->history_search[0] = '\0';
+    l->history_search_len = 0;
+    l->history_search_index = history_len - 2; /* Skip current edit buffer. */
+    l->in_history_search = 1;
+    linenoiseHistorySearchRefresh(l,l->history_search_index);
+}
+
+static char *linenoiseHistorySearchFeed(struct linenoiseState *l, char c) {
+    char seq[3];
+
+    switch(c) {
+    case CTRL_C:
+        linenoiseHistorySearchCancel(l);
+        errno = EAGAIN;
+        return NULL;
+    case CTRL_G:
+        linenoiseHistorySearchCancel(l);
+        return linenoiseEditMore;
+    case ENTER:
+        linenoiseHistorySearchAccept(l);
+        history_len--;
+        free(history[history_len]);
+        return strdup(l->buf);
+    case CTRL_R:
+        linenoiseHistorySearchRefresh(l,l->history_search_index-1);
+        return linenoiseEditMore;
+    case BACKSPACE:
+    case CTRL_H:
+        if (l->history_search_len > 0) {
+            l->history_search_len -= utf8PrevCharLen(l->history_search,
+                                                     l->history_search_len);
+            l->history_search[l->history_search_len] = '\0';
+            linenoiseHistorySearchRefresh(l,history_len-2);
+        } else {
+            linenoiseBeep();
+        }
+        return linenoiseEditMore;
+    case ESC:
+        if (read(l->ifd,seq,1) != 1) {
+            linenoiseHistorySearchCancel(l);
+            return linenoiseEditMore;
+        }
+        if (read(l->ifd,seq+1,1) != 1) {
+            linenoiseHistorySearchCancel(l);
+            return linenoiseEditMore;
+        }
+        if (seq[0] == '[' && seq[1] == 'C') {
+            linenoiseHistorySearchAccept(l);
+        } else {
+            linenoiseHistorySearchCancel(l);
+        }
+        return linenoiseEditMore;
+    default:
+        if ((unsigned char)c >= 32) {
+            int utf8len = utf8ByteLen(c);
+            char utf8[4];
+            int i;
+
+            if (l->history_search_len + utf8len >= sizeof(l->history_search)) {
+                linenoiseBeep();
+                return linenoiseEditMore;
+            }
+            utf8[0] = c;
+            for (i = 1; i < utf8len; i++) {
+                if (read(l->ifd,utf8+i,1) != 1) break;
+            }
+            if (i != utf8len) return linenoiseEditMore;
+            memcpy(l->history_search+l->history_search_len,utf8,utf8len);
+            l->history_search_len += utf8len;
+            l->history_search[l->history_search_len] = '\0';
+            linenoiseHistorySearchRefresh(l,history_len-2);
+        } else {
+            linenoiseBeep();
+        }
+        return linenoiseEditMore;
+    }
+}
+
 /* This function is part of the multiplexed API of Linenoise, that is used
  * in order to implement the blocking variant of the API but can also be
  * called by the user directly in an event driven program. It will:
@@ -1697,6 +1891,7 @@ int linenoiseEditStart(struct linenoiseState *l, int stdin_fd, int stdout_fd, ch
     /* Populate the linenoise state that we pass to functions implementing
      * specific editing functionalities. */
     l->in_completion = 0;
+    l->in_history_search = 0;
     l->ifd = stdin_fd != -1 ? stdin_fd : STDIN_FILENO;
     l->ofd = stdout_fd != -1 ? stdout_fd : STDOUT_FILENO;
     l->buf = buf;
@@ -1706,6 +1901,7 @@ int linenoiseEditStart(struct linenoiseState *l, int stdin_fd, int stdout_fd, ch
     l->plen = strlen(prompt);
     l->oldpos = l->pos = 0;
     l->len = 0;
+    l->history_search_saved = NULL;
     linenoiseFoldClear(l);
 
     /* Enter raw mode. */
@@ -1899,6 +2095,9 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
         return NULL;
     }
 
+    if (l->in_history_search)
+        return linenoiseHistorySearchFeed(l,c);
+
     /* Only autocomplete when the callback is set. completeLine()
      * returns the character to be handled next, or zero when the
      * key was consumed to navigate completions. */
@@ -1973,6 +2172,9 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
     case CTRL_N:    /* ctrl-n */
         linenoiseEditHistoryNext(l, LINENOISE_HISTORY_NEXT);
         break;
+    case CTRL_R:    /* ctrl-r */
+        linenoiseHistorySearchStart(l);
+        break;
     case ESC:    /* escape sequence */
         /* Read the next two bytes representing the escape sequence.
          * Use two calls to handle slow terminals returning the two
@@ -1991,7 +2193,7 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
                 while (plen < sizeof(param)) {
                     char p;
                     if (read(l->ifd,&p,1) != 1) break;
-                    if (p >= '0' && p <= '9') {
+                    if ((p >= '0' && p <= '9') || p == ';') {
                         param[plen++] = p;
                     } else {
                         final = p;
@@ -2003,6 +2205,14 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
                         linenoiseEditDelete(l);
                     } else if (plen == 3 && memcmp(param,"200",3) == 0) {
                         linenoiseEditPaste(l);
+                    }
+                } else if (plen == 3 &&
+                           (memcmp(param,"1;5",3) == 0 ||
+                            memcmp(param,"1;3",3) == 0)) {
+                    if (final == 'D') {
+                        linenoiseEditMoveWordLeft(l);
+                    } else if (final == 'C') {
+                        linenoiseEditMoveWordRight(l);
                     }
                 }
             } else {

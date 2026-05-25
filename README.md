@@ -69,6 +69,16 @@ See `example_luv.lua` for use with `luv`.
 - `clearscreen()`, `setmultiline(enabled)`, `setmaskmode(enabled)`, and
   `printkeycodes()` expose linenoise terminal helpers.
 
+## Key bindings
+
+In addition to the usual character movement, history, deletion, completion,
+and clear-screen shortcuts, the editor supports:
+
+- `Ctrl+Left` / `Ctrl+Right` and `Alt+Left` / `Alt+Right` to move by word.
+- `Ctrl+R` for reverse history search. Type to refine the query, press
+  `Ctrl+R` again to cycle older matches, `Enter` to submit the selected match,
+  `Right` to accept it for further editing, or `Ctrl+G` to cancel.
+
 ## Publishing
 
 Before uploading to LuaRocks:
@@ -76,22 +86,22 @@ Before uploading to LuaRocks:
 1. Commit the repository and tag the release:
 
    ```sh
-   git tag v0.1.2
+   git tag v0.1.3
    git push origin main --tags
    ```
 
 2. Check the rock locally:
 
    ```sh
-   luarocks lint linenoise-luv-0.1.2-1.rockspec
-   luarocks make linenoise-luv-0.1.2-1.rockspec
-   luarocks pack linenoise-luv-0.1.2-1.rockspec
+   luarocks lint linenoise-luv-0.1.3-1.rockspec
+   luarocks make linenoise-luv-0.1.3-1.rockspec
+   luarocks pack linenoise-luv-0.1.3-1.rockspec
    ```
 
 3. Upload:
 
    ```sh
-   luarocks upload linenoise-luv-0.1.2-1.rockspec --api-key=YOUR_API_KEY
+   luarocks upload linenoise-luv-0.1.3-1.rockspec --api-key=YOUR_API_KEY
    ```
 
 LuaRocks package names are global. The package name here is
