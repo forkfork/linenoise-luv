@@ -2176,10 +2176,13 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
         linenoiseHistorySearchStart(l);
         break;
     case ESC:    /* escape sequence */
-        /* Read the next two bytes representing the escape sequence.
-         * Use two calls to handle slow terminals returning the two
-         * chars at different times. */
+        /* Read the first byte after ESC. Some Alt-modified keys are only
+         * ESC plus one byte, while cursor-key sequences continue below. */
         if (read(l->ifd,seq,1) == -1) break;
+        if (seq[0] == BACKSPACE || seq[0] == CTRL_H) { /* Alt+Backspace */
+            linenoiseEditDeletePrevWord(l);
+            break;
+        }
         if (read(l->ifd,seq+1,1) == -1) break;
 
         /* ESC [ sequences. */
